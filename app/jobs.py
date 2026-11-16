@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 import traceback
 from datetime import datetime
 
-from . import db, matcher, providers
+from . import db, matcher, notify, providers
 from .providers import Provider, QuotaPaused
 from .providers.base import label
 
@@ -19,15 +20,47 @@ _state_lock = threading.Lock()
 _state = {"name": None, "running": False, "message": "", "error": None, "done": 0, "total": 0,
           "finished_at": None}
 _stop = threading.Event()
+_phase = {"start": 0.0, "done0": 0, "total": None, "started_at": 0.0}
+
+JOB_TITLES = {"import": "Загрузка", "match": "Поиск", "transfer": "Перенос", "sync": "Синхронизация"}
+
+
+def fmt_duration(sec: float) -> str:
+    sec = int(round(sec))
+    if sec < 60:
+        return "меньше минуты"
+    m = sec // 60
+    if m < 60:
+        return f"{m} мин"
+    h, m = divmod(m, 60)
+    return f"{h} ч {m} мин" if m else f"{h} ч"
+
+
+def eta_seconds(done: int, total: int, elapsed: float, done0: int = 0) -> float | None:
+    """Оценка оставшегося времени по средней скорости текущего этапа. None — пока рано судить."""
+    progressed = done - done0
+    if not total or progressed < 3 or elapsed < 3 or done >= total:
+        return None
+    return (total - done) * elapsed / progressed
 
 
 def state() -> dict:
     with _state_lock:
-        return dict(_state)
+        st = dict(_state)
+        ph = dict(_phase)
+    st["eta"] = None
+    if st["running"] and st["total"]:
+        sec = eta_seconds(st["done"], st["total"], time.time() - ph["start"], ph["done0"])
+        if sec is not None:
+            st["eta"] = fmt_duration(sec)
+    return st
 
 
 def _set(**kw) -> None:
     with _state_lock:
+        # новый этап (поменялось общее число) — скорость считаем заново
+        if "total" in kw and kw["total"] != _phase["total"]:
+            _phase.update(start=time.time(), done0=kw.get("done", 0), total=kw["total"])
         _state.update(kw)
 
 
@@ -40,6 +73,7 @@ def _run(name: str, fn, sync: bool = False) -> bool:
         if _state["running"]:
             return False
         _state.update(name=name, running=True, message="Запуск…", error=None, done=0, total=0, finished_at=None)
+        _phase.update(start=time.time(), done0=0, total=0, started_at=time.time())
     _stop.clear()
 
     def wrapper():
@@ -53,12 +87,26 @@ def _run(name: str, fn, sync: bool = False) -> bool:
             _set(error=str(e) or e.__class__.__name__)
         finally:
             _set(running=False, finished_at=datetime.now().strftime("%H:%M:%S"))
+            _notify_finished(name)
 
     if sync:
         wrapper()
     else:
         threading.Thread(target=wrapper, daemon=True, name=f"job-{name}").start()
     return True
+
+
+def _notify_finished(name: str) -> None:
+    """Уведомление Windows, если задача шла дольше минуты или упёрлась в лимит/ошибку."""
+    st = state()
+    long_job = time.time() - _phase["started_at"] >= float(db.settings().get("notify_after", 60))
+    if not (long_job or st["error"]) or not db.settings().get("notifications", True):
+        return
+    title = JOB_TITLES.get(name, "Задача")
+    if st["error"]:
+        notify.send(f"{title}: остановлено", st["error"])
+    else:
+        notify.send(f"{title}: готово", st["message"] or "Готово")
 
 
 # --- 1. Загрузка из источника --------------------------------------------------

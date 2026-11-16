@@ -201,3 +201,30 @@ def test_web_review_and_csv(env):
     nf = c.get("/not_found.csv").text
     assert "Совсем неизвестная песня" in nf and "пропущен" in nf
     assert "Bohemian" in c.get("/export.csv").text
+
+
+def test_eta_and_format():
+    from app.jobs import eta_seconds, fmt_duration
+    assert eta_seconds(1, 100, 10) is None          # слишком рано
+    assert eta_seconds(50, 100, 100) == 100          # половина за 100 с → ещё 100 с
+    assert eta_seconds(60, 100, 40, done0=40) == 80  # этап начался с 40: 20 шт за 40 с → 40 шт за 80 с
+    assert fmt_duration(30) == "меньше минуты" and fmt_duration(600) == "10 мин" and fmt_duration(7500) == "2 ч 5 мин"
+
+
+def test_notification_on_error_and_long_job(env, monkeypatch):
+    db, src, dst = env
+    from app import jobs, notify
+    notify.sent.clear()
+    jobs.start_import("yandex", [("likes", "likes")], sync=True)
+    assert notify.sent == []        # быстрая задача без ошибок: не беспокоим
+    dst.fail_after = 0
+    jobs.start_match("spotify", sync=True)
+    assert notify.sent and "остановлено" in notify.sent[-1][0] and "квота" in notify.sent[-1][1]
+    dst.unpause(); dst.fail_after = None
+    db.update_settings(notify_after=0)
+    jobs.start_match("spotify", sync=True)
+    assert notify.sent[-1][0] == "Поиск: готово"
+    db.update_settings(notifications=False)
+    n = len(notify.sent)
+    jobs.start_match("spotify", sync=True)
+    assert len(notify.sent) == n

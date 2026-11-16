@@ -71,6 +71,7 @@ def _ctx(request: Request, **extra) -> dict:
         "active": active, "source": src_meta or None, "sources": srcs,
         "counts": db.counts(active, dest.id if dest else None),
         "link": link, "default_playlist": link.get("playlist_name") or default_pl,
+        "notifications": db.settings().get("notifications", True),
         "has_likes_sources": any(m.get("kind") == "likes" for m in db.sources().values()),
         **extra,
     }
@@ -191,6 +192,17 @@ def tidal_login(proxy: str = Form("")):
 def tidal_login_state():
     t = providers.ALL["tidal"]
     return JSONResponse({**t.login_state(), "connected": t.is_connected(), "account": t.account()})
+
+
+@app.post("/settings/notifications")
+def settings_notifications(enabled: str = Form(""), action: str = Form("save")):
+    from . import notify
+    db.update_settings(notifications=bool(enabled))
+    if action == "test":
+        notify.send("Перенос музыки", "Так будет выглядеть уведомление об окончании переноса")
+        return _flash("Уведомление отправлено. Если оно не появилось, проверьте, что уведомления Windows "
+                      "для PowerShell не отключены (Параметры → Система → Уведомления).")
+    return _flash("Настройка уведомлений сохранена")
 
 
 # --- источники -----------------------------------------------------------------
