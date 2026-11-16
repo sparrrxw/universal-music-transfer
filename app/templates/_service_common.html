@@ -1,0 +1,20 @@
+<div class="card">
+  <details>
+    <summary>Лимиты запросов{% if p.paused_until %} (сейчас пауза до {{ p.paused_until }}){% endif %}</summary>
+    <p class="muted">Запросов сегодня: {{ p.requests_today }}{% if p.budget %} из {{ p.budget }}{% endif %}.
+      Дневной лимит касается только поиска; запись (лайки, плейлисты) идёт без него.</p>
+    <form method="post" action="/services/{{ p.id }}/limits">
+      <div class="row">
+        <div><label>Дневной лимит запросов поиска (пусто — по умолчанию)</label><input type="number" name="daily_budget" value="{{ cfg.daily_budget or '' }}"></div>
+        <div><label>Пауза между запросами, сек (пусто — по умолчанию)</label><input type="number" step="0.05" name="request_interval" value="{{ cfg.request_interval or '' }}"></div>
+      </div>
+      <p><button class="secondary">Сохранить</button></p>
+    </form>
+    {% if p.paused_until %}
+    <form method="post" action="/services/{{ p.id }}/unpause"><button class="secondary">Снять паузу</button></form>
+    {% endif %}
+  </details>
+  {% if p.connected and p.id not in ('csv', 'deezer') %}
+  <form method="post" action="/services/{{ p.id }}/disconnect" style="margin-top:10px"><button class="danger">Выйти из {{ p.name }}</button></form>
+  {% endif %}
+</div>

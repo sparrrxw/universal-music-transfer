@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2><span class="dot" style="background:{{ p.color }}"></span>TIDAL</h2>
+  {% if p.connected %}<p>Подключён аккаунт: <b>{{ p.account or "—" }}</b></p>{% endif %}
+  <p class="muted">Вход как на телевизоре: сервис покажет ссылку, вы откроете её, войдёте в TIDAL и подтвердите.
+    Ключи разработчика не нужны, но нужна подписка TIDAL.</p>
+  <form method="post" action="/services/tidal/login">
+    <div class="row"><div><label>Прокси (необязательно)</label><input type="text" name="proxy" value="{{ cfg.proxy or '' }}"></div></div>
+    <p><button>{% if p.connected %}Войти заново{% else %}Войти в TIDAL{% endif %}</button></p>
+  </form>
+  <div id="tidal-login" style="{% if not tidal_login.url or tidal_login.done %}display:none{% endif %}">
+    <p>Откройте ссылку и подтвердите вход: <a id="tl-url" href="{{ tidal_login.url or '#' }}" target="_blank">{{ tidal_login.url or '' }}</a><br>
+      <span class="muted">Код: <b id="tl-code">{{ tidal_login.code or '' }}</b>. Страница обновится сама.</span></p>
+  </div>
+  {% if tidal_login.error %}<p class="flash error">TIDAL: {{ tidal_login.error }}</p>{% endif %}
+</div>
+{% include "_service_common.html" %}
+<script>
+async function pollTidal() {
+  try {
+    const d = await (await fetch('/api/tidal-login')).json();
+    if (d.url && !d.done) { setTimeout(pollTidal, 2000); return; }
+    if (d.done && document.getElementById('tidal-login').style.display !== 'none') location.reload();
+  } catch (e) { setTimeout(pollTidal, 3000); }
+}
+{% if tidal_login.url and not tidal_login.done %}pollTidal();{% endif %}
+</script>
+{% endblock %}

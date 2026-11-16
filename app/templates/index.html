@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="card" id="job">
+  <h2>Статус{% if source and dest %}: «{{ source.title }}» → {{ dest.name }}{% endif %}</h2>
+  <div class="stats">
+    <div class="stat"><span class="muted">Треков в источнике</span><b id="c-total">{{ counts.total }}</b></div>
+    <div class="stat"><span class="muted">Найдено</span><b id="c-matched">{{ counts.matched }}</b></div>
+    <div class="stat"><span class="muted">На проверку</span><b id="c-review">{{ counts.review }}</b></div>
+    <div class="stat"><span class="muted">Не найдено</span><b id="c-nf">{{ counts.not_found }}</b></div>
+    <div class="stat"><span class="muted">Ещё не искали</span><b id="c-new">{{ counts.new }}</b></div>
+    <div class="stat"><span class="muted">В лайках</span><b id="c-lib">{{ counts.saved_library }}</b></div>
+    <div class="stat"><span class="muted">В плейлисте</span><b id="c-pl">{{ counts.in_playlist }}</b></div>
+  </div>
+  <div class="bar"><div id="bar"></div></div>
+  <div id="job-msg">{{ job.message or "Задач нет" }}</div>
+  <div id="job-err" class="flash error" style="{% if not job.error %}display:none{% endif %};margin-top:8px">{{ job.error or "" }}</div>
+  {% if dest %}<p class="muted">Запросов к {{ dest.name }} сегодня: {{ dest.requests_today }}{% if dest.budget %} из {{ dest.budget }}{% endif %}
+    {% if dest.paused_until %} · <b>пауза до {{ dest.paused_until }}</b>{% endif %}</p>{% endif %}
+  <form method="post" action="/jobs/stop" id="stop-form" style="{% if not job.running %}display:none{% endif %}">
+    <button class="danger">Остановить</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Сервисы</h2>
+  <div class="services">
+    {% for s in services %}
+    <a class="svc" href="/services/{{ s.id }}">
+      <span class="dot" style="background:{{ s.color }}"></span><b>{{ s.name }}</b><br>
+      {% if s.can_read %}<span class="tag">откуда</span>{% endif %}{% if s.can_write %}<span class="tag">куда</span>{% endif %}
+      {% if s.connected %}<span class="tag ok">готов{% if s.account %}: {{ s.account }}{% endif %}</span>{% else %}<span class="tag">не подключён</span>{% endif %}
+      {% if s.paused_until %}<span class="tag">пауза до {{ s.paused_until }}</span>{% endif %}
+    </a>
+    {% endfor %}
+  </div>
+  <details style="margin-top:10px"><summary>Каких сервисов нет и почему</summary>
+    <ul>{% for x in planned %}<li><b>{{ x.name }}.</b> {{ x.why }}</li>{% endfor %}</ul>
+  </details>
+</div>
+
+<div class="card">
+  <h2><span class="step {% if sources %}done{% endif %}">1</span> Откуда</h2>
+  {% if sources %}
+  <table>
+    {% for src in sources %}
+    <tr {% if src.key == active %}style="background:var(--ok-bg)"{% endif %}>
+      <td><b>{{ src.provider_name }}: {{ src.title }}</b>{% if src.key == active %} <span class="muted">· выбран</span>{% endif %}<br>
+        <span class="muted">треков {{ src.counts.total }}{% if dest %} · найдено в {{ dest.name }} {{ src.counts.matched }} · на проверку {{ src.counts.review }}
+          · не найдено {{ src.counts.not_found }} · не искали {{ src.counts.new }}
+          · в лайках {{ src.counts.saved_library }} · в плейлисте {{ src.counts.in_playlist }}{% endif %}
+          {% if src.loaded_at %} · загружено {{ src.loaded_at }}{% endif %}</span></td>
+      <td style="width:1%;white-space:nowrap">
+        {% if src.key != active %}
+        <form method="post" action="/sources/select" style="display:inline"><input type="hidden" name="key" value="{{ src.key }}">
+          <button class="secondary">Выбрать</button></form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">Пока ничего не загружено.</p>
+  {% endif %}
+  <p><a class="btn" href="/add">Добавить источник</a>
+    <span class="muted">лайки или плейлисты любого подключённого сервиса, ссылка на открытый плейлист или CSV-файл</span></p>
+</div>
+
+<div class="card">
+  <h2><span class="step {% if dest and dest.connected %}done{% endif %}">2</span> Куда</h2>
+  {% if writers %}
+  <form method="post" action="/dest" class="row" style="align-items:center">
+    <select name="pid" onchange="this.form.submit()" style="flex:0 0 auto">
+      {% for w in writers %}
+      <option value="{{ w.id }}" {% if dest and dest.id == w.id %}selected{% endif %}>{{ w.name }}{% if not w.connected %} (не подключён){% endif %}</option>
+      {% endfor %}
+    </select>
+    <noscript><button class="secondary" style="flex:0">Выбрать</button></noscript>
+    <span class="muted">Можно переносить один и тот же источник в несколько сервисов по очереди: результаты поиска хранятся отдельно для каждого.</span>
+  </form>
+  {% if dest and not dest.connected %}<p class="flash error">{{ dest.name }} не подключён. <a href="/services/{{ dest.id }}">Подключить</a></p>{% endif %}
+  {% endif %}
+  <p class="muted">Нужен просто файл (например, для Apple Music через TuneMyMusic)? <a href="/export.csv">Скачать выбранный список в CSV</a>
+    · <a href="/export.csv?all=1">все списки</a></p>
+</div>
+
+<div class="card">
+  <h2><span class="step {% if counts.total and not counts.new %}done{% endif %}">3</span> Найти треки{% if dest %} в {{ dest.name }}{% endif %}</h2>
+  <p class="muted">Поиск идёт сразу по всем загруженным спискам, начиная с выбранного. Сначала по ISRC (где сервис это умеет),
+    потом по артисту и названию, потом латиницей. Результаты кэшируются, повторный поиск бесплатен.
+    Если сервис ограничит запросы, работа встанет на паузу: нажмите кнопку снова после указанного времени.</p>
+  <form method="post" action="/jobs/match">
+    <label style="display:inline"><input type="checkbox" name="retry_not_found" value="1"> заново искать «не найденные»</label>
+    <p><button {% if not dest or not dest.connected or not counts.total or job.running %}disabled{% endif %}>Начать поиск</button></p>
+  </form>
+</div>
+
+<div class="card">
+  <h2><span class="step {% if counts.total and not counts.review and not counts.new %}done{% endif %}">4</span> Проверить спорные</h2>
+  <p>На проверку: <b>{{ counts.review }}</b>, не найдено: <b>{{ counts.not_found }}</b>. <a href="/review">Открыть проверку</a></p>
+</div>
+
+<div class="card">
+  <h2><span class="step {% if counts.saved_library or counts.in_playlist %}done{% endif %}">5</span> Перенести{% if dest %} в {{ dest.name }}{% endif %}{% if source %}: «{{ source.title }}»{% endif %}</h2>
+  <form method="post" action="/jobs/transfer">
+    <label style="display:inline"><input type="checkbox" name="to_library" value="1"
+      {% if (link.last_transfer and link.last_transfer.to_library) or (not link.last_transfer and source and source.kind == 'likes') %}checked{% endif %}>
+      в лайки{% if dest %} («{{ dest.likes_name }}»){% endif %}</label><br>
+    <label style="display:inline"><input type="checkbox" name="to_playlist" value="1"
+      {% if (link.last_transfer and link.last_transfer.to_playlist) or (not link.last_transfer and source and source.kind != 'likes') %}checked{% endif %}> в плейлист</label>
+    <div class="row"><div><label>Название плейлиста</label>
+      <input type="text" name="playlist_name" value="{{ (link.playlist and link.playlist.name) or default_playlist }}"></div></div>
+    <p class="muted">Будет перенесено найденных треков: {{ counts.matched }}. Лайки ставятся от старых к новым, чтобы порядок совпал
+      с источником. Спорные и не найденные не переносятся, пока вы их не подтвердите. Повторный перенос досылает только новое.
+      Если поменять название, будет создан новый плейлист.</p>
+    <p><button {% if not dest or not dest.connected or not counts.matched or job.running %}disabled{% endif %}>Перенести</button></p>
+  </form>
+  {% if sources|length > 1 %}
+  <form method="post" action="/jobs/transfer-all" style="margin-top:10px">
+    <button class="secondary" {% if not dest or not dest.connected or job.running %}disabled{% endif %}>Перенести все плейлисты (каждый в свой плейлист)</button>
+    <span class="muted">Найдёт ещё не искавшиеся треки и создаст по плейлисту на каждый загруженный список, кроме лайков.</span>
+  </form>
+  {% endif %}
+</div>
+
+{% if has_likes_sources %}
+<div class="card">
+  <h2>Синхронизация новых лайков</h2>
+  <p class="muted">Одной кнопкой: для каждого загруженного списка лайков забрать новые треки, найти их и перенести туда же
+    и так же, как в прошлый раз (по каждому сервису, куда вы уже переносили). Новые лайки окажутся сверху.</p>
+  <form method="post" action="/jobs/sync"><button {% if job.running %}disabled{% endif %}>Синхронизировать новые лайки</button></form>
+</div>
+{% endif %}
+
+<div class="card">
+  <details>
+    <summary>Дополнительно</summary>
+    {% if source %}
+    <form method="post" action="/sources/remove" style="margin-top:14px">
+      <input type="hidden" name="key" value="{{ active }}">
+      <label>Убрать выбранный список «{{ source.title }}» из сервиса (в самих музыкальных сервисах ничего не удалится). Впишите «да»</label>
+      <div class="row"><input type="text" name="confirm"><button class="danger" style="flex:0">Убрать</button></div>
+    </form>
+    {% endif %}
+    <p class="muted">Лимиты запросов и прокси настраиваются на странице каждого сервиса.</p>
+  </details>
+</div>
+
+<script>
+let wasRunning = {{ 'true' if job.running else 'false' }};
+async function poll() {
+  try {
+    const r = await fetch('/api/status'); const d = await r.json();
+    const j = d.job, c = d.counts;
+    document.getElementById('job-msg').textContent = j.message || 'Задач нет';
+    const err = document.getElementById('job-err');
+    err.style.display = j.error ? '' : 'none'; err.textContent = j.error || '';
+    document.getElementById('bar').style.width = j.total ? (100 * j.done / j.total) + '%' : (j.running ? '5%' : '0');
+    for (const [id, k] of [['c-total','total'],['c-matched','matched'],['c-review','review'],['c-nf','not_found'],['c-new','new'],['c-lib','saved_library'],['c-pl','in_playlist']])
+      document.getElementById(id).textContent = c[k];
+    document.getElementById('stop-form').style.display = j.running ? '' : 'none';
+    if (wasRunning && !j.running) { location.reload(); return; }
+    wasRunning = j.running;
+  } catch (e) {}
+  setTimeout(poll, 1500);
+}
+poll();
+</script>
+{% endblock %}

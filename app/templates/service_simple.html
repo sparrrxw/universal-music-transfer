@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2><span class="dot" style="background:{{ p.color }}"></span>{{ p.name }}</h2>
+  <p>{{ p.note }}</p>
+  {% if p.id == 'deezer' %}
+  <p class="muted">Вход не нужен. Добавьте источник по ссылке на открытый плейлист или профиль на странице
+    <a href="/add?pid=deezer">«Добавить источник»</a>. Переносить <b>в</b> Deezer пока нельзя: с 2025 года Deezer не выдаёт
+    частным лицам ключи API, без которых сторонняя программа не может ставить лайки и создавать плейлисты.</p>
+  {% else %}
+  <p class="muted"><a href="/add?pid=csv">Загрузить CSV-файл</a> как источник. Скачать любой загруженный список в CSV можно
+    на главной в блоке «Куда». Такой файл понимают TuneMyMusic и Soundiiz, через них можно добраться до Apple Music.</p>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2><span class="dot" style="background:{{ p.color }}"></span>YouTube Music</h2>
+  {% if p.connected %}<p>Подключён аккаунт: <b>{{ p.account or "—" }}</b></p>{% endif %}
+  <p class="muted">Официального API для библиотеки YouTube Music нет, поэтому сервис работает как ваш браузер:
+    ему нужны заголовки одного запроса к music.youtube.com. Ключи разработчика не нужны. Вход живёт, пока вы не выйдете
+    из аккаунта в браузере.</p>
+  <ol class="steps">
+    <li>Откройте в Brave <a href="https://music.youtube.com" target="_blank">music.youtube.com</a> и убедитесь, что вошли в аккаунт.</li>
+    <li>Нажмите <b>F12</b> → вкладка <b>Network</b> (Сеть). В поле фильтра введите <code>browse</code>.</li>
+    <li>Кликните в YouTube Music на «Библиотека» или «Главная», чтобы появился запрос <code>browse?…</code> (метод POST).</li>
+    <li>Нажмите на него правой кнопкой → <b>Copy</b> → <b>Copy request headers</b>
+      (если такого пункта нет: откройте запрос, вкладка Headers, раздел Request Headers, выделите всё и скопируйте).</li>
+    <li>Вставьте в поле ниже и нажмите «Подключить».</li>
+  </ol>
+  <form method="post" action="/services/ytmusic/connect">
+    <label>Заголовки запроса</label>
+    <textarea name="headers" rows="8" style="width:100%;font:12px monospace;background:var(--bg);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:8px" placeholder="accept: */*&#10;authorization: SAPISIDHASH …&#10;cookie: …"></textarea>
+    <div class="row"><div><label>Прокси (необязательно)</label><input type="text" name="proxy" value="{{ cfg.proxy or '' }}"></div></div>
+    <p><button>Подключить</button></p>
+  </form>
+  <p class="muted">В заголовках есть cookie вашего аккаунта Google: никому их не пересылайте. Хранятся только у вас в папке <code>data</code>.
+    Лайки в YouTube Music ставятся по одному, поэтому перенос большой коллекции идёт медленнее, чем в Spotify.</p>
+</div>
+{% include "_service_common.html" %}
+{% endblock %}

@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2>Добавить источник</h2>
+  <p>Выберите сервис:
+    {% for r in readers %}
+      <a class="btn {% if not p or p.id != r.id %}secondary{% endif %}" href="/add?pid={{ r.id }}" style="margin:2px">{{ r.name }}</a>
+    {% endfor %}
+  </p>
+</div>
+
+<div class="card">
+  <h2>По ссылке на открытый плейлист</h2>
+  <p class="muted">Подходит любой сервис из списка: ссылка сама подскажет, откуда брать. Например, лайки друга в Яндексе
+    (<code>music.yandex.ru/users/ЛОГИН/playlists/3</code>), плейлист Spotify, YouTube Music, TIDAL, плейлист или профиль Deezer.</p>
+  <form method="post" action="/add-link">
+    <div class="row">
+      <div><input type="text" name="url" placeholder="https://…"></div>
+      <button style="flex:0 0 auto" {% if job.running %}disabled{% endif %}>Загрузить по ссылке</button>
+    </div>
+  </form>
+</div>
+
+{% if p and p.id == 'csv' %}
+<div class="card">
+  <h2>Из CSV-файла</h2>
+  <p class="muted">Первая строка — заголовки. Нужна колонка с названием трека (<code>Track name</code>, <code>Title</code> или
+    <code>Название</code>) и желательно с артистом (<code>Artist name</code>, <code>Artist</code>, <code>Исполнитель</code>).
+    Если есть <code>ISRC</code>, <code>Album</code>, <code>Duration</code>, они улучшат поиск. Подходят выгрузки TuneMyMusic,
+    Soundiiz, Exportify и таблицы из Excel (сохраните как CSV).</p>
+  <form method="post" action="/add-csv" enctype="multipart/form-data">
+    <div class="row"><div><input type="file" name="file" accept=".csv,.txt,text/csv"></div>
+      <button style="flex:0 0 auto">Загрузить файл</button></div>
+  </form>
+</div>
+{% elif p and p.id == 'deezer' %}
+<div class="card">
+  <h2>Deezer</h2>
+  <p>Deezer не даёт входить сторонним программам, поэтому треки берутся только по ссылке (форма выше):
+    открытый плейлист <code>deezer.com/ru/playlist/…</code> или профиль <code>deezer.com/ru/profile/…</code>
+    (заберём его любимые треки, если профиль открыт).</p>
+</div>
+{% elif p %}
+<div class="card">
+  <h2>{{ p.name }}: мои лайки и плейлисты</h2>
+  {% if not p.connected %}
+    <p class="flash error">{{ p.name }} не подключён. <a href="/services/{{ p.id }}">Подключить</a></p>
+  {% elif error %}
+    <p class="flash error">{{ error }}</p>
+  {% else %}
+  <form method="post" action="/add/{{ p.id }}">
+    <table>
+      {% for c in colls %}
+      <tr><td style="width:1%"><input type="checkbox" name="key" value="{{ c.key }}" id="c{{ loop.index }}" {% if c.kind == 'likes' and not c.loaded %}checked{% endif %}></td>
+        <td><label for="c{{ loop.index }}" style="margin:0;color:inherit;font-size:15px"><b>{{ c.title }}</b></label>
+          <span class="muted">{% if c.count is not none %}{{ c.count }} треков{% endif %}{% if c.loaded %} · уже загружен, повторная загрузка добавит новое{% endif %}{% if c.note %} · {{ c.note }}{% endif %}</span></td></tr>
+      {% endfor %}
+    </table>
+    <p><button {% if job.running %}disabled{% endif %}>Загрузить отмеченные</button>
+      <span class="muted">Найденное ранее не сбрасывается.</span></p>
+  </form>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

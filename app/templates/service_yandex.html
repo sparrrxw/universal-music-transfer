@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2><span class="dot" style="background:{{ p.color }}"></span>Яндекс Музыка</h2>
+  {% if p.connected %}<p>Подключён аккаунт: <b>{{ p.account or "—" }}</b></p>{% endif %}
+  <p class="muted">Токен нужен, чтобы читать <b>свои</b> лайки и плейлисты и чтобы переносить музыку <b>в</b> Яндекс.
+    Открытый чужой плейлист можно загрузить по ссылке и без токена.</p>
+  <ol class="steps">
+    <li>Нажмите «Получить токен» и войдите в Яндекс.</li>
+    <li>Браузер откроет music.yandex.ru, а в адресной строке будет <code>#access_token=…</code>. Быстро скопируйте <b>весь адрес</b>
+      (страница может сама перейти дальше; тогда нажмите «Получить токен» ещё раз).</li>
+    <li>Вставьте адрес ниже и нажмите «Сохранить и проверить».</li>
+  </ol>
+  <form method="post" action="/services/yandex/connect">
+    <div class="row">
+      <div><label>Токен или скопированный адрес</label><input type="password" name="token" placeholder="y0_… или https://music.yandex.ru/#access_token=…"></div>
+      <div><label>Прокси (необязательно, если вы за границей)</label><input type="text" name="proxy" value="{{ cfg.proxy or '' }}"></div>
+    </div>
+    <p><a class="btn secondary" href="{{ yandex_oauth }}" target="_blank">Получить токен</a> <button>Сохранить и проверить</button></p>
+  </form>
+  <p class="muted">Токен хранится только у вас на компьютере, в папке <code>data</code>.</p>
+</div>
+{% include "_service_common.html" %}
+{% endblock %}

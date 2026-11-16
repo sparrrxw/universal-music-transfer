@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h2><span class="dot" style="background:{{ p.color }}"></span>Spotify</h2>
+  {% if p.connected %}<p>Подключён аккаунт: <b>{{ p.account or "—" }}</b></p>{% endif %}
+  <ol class="steps">
+    <li>Откройте <a href="https://developer.spotify.com/dashboard" target="_blank">developer.spotify.com/dashboard</a>.
+      Если у вас уже есть приложение (например, от сервиса «Яндекс Музыка → Spotify»), используйте его: Spotify разрешает одно
+      приложение на человека. Иначе создайте новое и отметьте Web API. Владельцу приложения нужен Spotify Premium.</li>
+    <li>В настройках приложения добавьте Redirect URI <code>{{ redirect_uri }}</code> (старые адреса можно оставить).</li>
+    <li>Если входить будет не владелец приложения, добавьте его почту в User Management (до 5 человек).</li>
+    <li>Вставьте Client ID ниже, сохраните и нажмите «Войти в Spotify».</li>
+  </ol>
+  <form method="post" action="/services/spotify/settings">
+    <div class="row">
+      <div><label>Client ID</label><input type="text" name="client_id" value="{{ cfg.client_id or '' }}" placeholder="32 символа из Dashboard"></div>
+      <div><label>Прокси (необязательно)</label><input type="text" name="proxy" value="{{ cfg.proxy or '' }}" placeholder="http://127.0.0.1:1080 или socks5://…"></div>
+    </div>
+    <p><button class="secondary">Сохранить</button>
+      {% if cfg.client_id %}<a class="btn" href="/services/spotify/login">Войти в Spotify</a>{% endif %}</p>
+  </form>
+  <p class="muted">Spotify ограничивает число запросов в день. Когда квота закончится, поиск встанет на паузу примерно до
+    следующего дня и потом продолжится с того же места.</p>
+</div>
+{% include "_service_common.html" %}
+{% endblock %}
