@@ -409,7 +409,7 @@ def review_search(track_id: str, q: str = Form(""), status: str = Form("review")
     merged = {c["id"]: c for c in json.loads(row["candidates"] or "[]")}
     for cand in found:
         if cand.get("id"):
-            merged[cand["id"]] = matcher.candidate_view(cand, matcher.score(src, cand))
+            merged[cand["id"]] = matcher.candidate_view(cand, matcher.score(src, cand), src)
     ranked = sorted(merged.values(), key=lambda c: c["score"] or 0, reverse=True)[:10]
     db.set_match(row["source_key"], row["track_id"], dest.id, candidates=json.dumps(ranked, ensure_ascii=False))
     return _flash(f"Найдено вариантов: {len(found)}" if found else f"{dest.name} ничего не нашёл по этому запросу",

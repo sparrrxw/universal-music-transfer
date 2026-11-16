@@ -10,6 +10,9 @@
     <a href="/review?status=manual" class="{% if status=='manual' %}active{% endif %}">Выбрано вручную ({{ counts.manual }})</a>
     <a href="/review?status=skipped" class="{% if status=='skipped' %}active{% endif %}">Пропущено ({{ counts.skipped }})</a>
   </p>
+  <p class="muted">Число слева — насколько вариант похож на трек (из 100; от 85 трек принимается сам). Оранжевым написано,
+    что не совпало. Ремиксы, живые версии, каверы, караоке и ускоренные версии никогда не принимаются вместо оригинала
+    автоматически.</p>
   <p class="muted">Выберите правильный вариант, найдите своим запросом или вставьте ссылку на трек{% if dest %} в {{ dest.name }}{% endif %}.
     Варианты открываются по ↗, чтобы послушать. Решение применяется и к тому же треку в других списках. Показаны первые 300 треков.</p>
   {% if status == 'review' and rows %}
@@ -34,6 +37,9 @@
     {{ t.artists }}<br>
     <span class="muted">{{ t.album or "" }}{% if t.duration_ms %} · {{ t.duration_ms // 60000 }}:{{ '%02d' % (t.duration_ms // 1000 % 60) }}{% endif %}{% if t.isrc %} · ISRC {{ t.isrc }}{% endif %}</span>
     {% if t.dest_label %}<br><span class="muted">→ {{ t.dest_label }}</span>{% endif %}
+    {% if t.candidates and t.candidates[0].why and status in ('review', 'not_found') %}
+    <br><span class="why">Почему спорный: {{ t.candidates[0].why | join("; ") }}</span>
+    {% elif not t.candidates and status == 'not_found' %}<br><span class="why">Ничего похожего не нашлось</span>{% endif %}
   </td>
   <td>
     <form method="post" action="/review/{{ t.track_id | urlencode }}">
@@ -45,6 +51,7 @@
         <label for="r{{ t.position }}-{{ loop.index }}" style="margin:0;color:inherit;font-size:14px">
           {{ c.artists }} — {{ c.name }}
           <span class="muted">{% if c.album %}· {{ c.album }}{% endif %}{% if c.duration_ms %} · {{ c.duration_ms // 60000 }}:{{ '%02d' % (c.duration_ms // 1000 % 60) }}{% endif %}</span>
+          {% if c.why %}<br><span class="why">{{ c.why | join("; ") }}</span>{% endif %}
         </label>
         {% if c.url %}<a href="{{ c.url }}" target="_blank" title="Открыть">↗</a>{% endif %}
       </div>

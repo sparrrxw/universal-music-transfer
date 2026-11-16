@@ -220,7 +220,7 @@ def match_one(row, p: Provider) -> None:
     top = ranked[0][1] if ranked else None
     db.set_match(
         row["source_key"], row["track_id"], p.id, status=status, score=top_score,
-        candidates=json.dumps([matcher.candidate_view(c, s) for s, c in ranked], ensure_ascii=False),
+        candidates=json.dumps([matcher.candidate_view(c, s, src) for s, c in ranked], ensure_ascii=False),
         dest_id=top["id"] if status == "auto" else None,
         dest_label=label(top) if status == "auto" else None,
     )

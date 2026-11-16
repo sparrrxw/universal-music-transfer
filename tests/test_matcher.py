@@ -107,3 +107,44 @@ def test_csv_parsing_variants():
     assert t["title"] == "Кукушка" and t["duration_ms"] == 401000
     with pytest.raises(ProviderError):
         parse_csv(b"foo,bar\n1,2\n")
+
+
+@pytest.mark.parametrize("cand_title,album,artists", [
+    ("Blinding Lights - Chromatics Remix", "After Hours", ["The Weeknd"]),
+    ("Blinding Lights (Live)", "After Hours", ["The Weeknd"]),
+    ("Blinding Lights", "Live at SoFi Stadium", ["The Weeknd"]),
+    ("Blinding Lights (Acoustic)", "After Hours", ["The Weeknd"]),
+    ("Blinding Lights - Slowed + Reverb", "After Hours", ["The Weeknd"]),
+    ("Blinding Lights (Karaoke Version)", "Karaoke Hits 2020", ["Sing2Music"]),
+    ("Blinding Lights", "Pop Covers", ["Vitamin String Quartet"]),
+    ("Blinding Lights (Cover)", "After Hours", ["The Weeknd"]),
+])
+def test_other_versions_never_auto_even_if_isrc_lookalike(cand_title, album, artists):
+    src = Source("Blinding Lights", None, ["The Weeknd"], "After Hours", 200000)
+    c = cand(cand_title, artists, album, 200000)
+    sc = matcher.score(src, c)
+    assert matcher.classify(sc) != "auto", (cand_title, sc)
+    assert matcher.explain(src, c), cand_title
+
+
+def test_live_requested_prefers_live():
+    src = Source("Hello", "Live at the Church Studios", ["Adele"], None, 300000)
+    live = cand("Hello - Live at the Church Studios", ["Adele"], "Hello (Live)", 300000)
+    studio = cand("Hello", ["Adele"], "25", 295000)
+    assert matcher.score(src, live) >= matcher.AUTO_THRESHOLD
+    assert matcher.score(src, studio) < matcher.AUTO_THRESHOLD
+    assert "в источнике живое исполнение" in matcher.explain(src, studio)[0]
+
+
+def test_plain_titles_with_tag_words_are_not_versions():
+    for title in ("Live Forever", "Cover Me", "Demons", "Live and Let Die"):
+        assert matcher.version_kinds(title) == set(), title
+    src = Source("Live Forever", None, ["Oasis"], "Definitely Maybe", 276000)
+    assert matcher.score(src, cand("Live Forever - Remastered", ["Oasis"], "Definitely Maybe", 277000)) >= 85
+
+
+def test_explain_reasons():
+    src = Source("Hello", None, ["Adele"], "25", 295000)
+    why = matcher.explain(src, cand("Hello", ["Lionel Richie"], "Can't Slow Down", 247000))
+    assert "другой артист" in why and any("длительность" in w for w in why) and "другой альбом" in why
+    assert matcher.explain(src, cand("Hello", ["Adele"], "25", 295500)) == []
