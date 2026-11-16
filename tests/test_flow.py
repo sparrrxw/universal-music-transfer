@@ -16,12 +16,13 @@ class FakeSource(Provider):
 
     def __init__(self):
         self.likes = []
+        self.meta = {}
 
     def is_connected(self):
         return True
 
     def fetch(self, key, progress=None):
-        return "Мне нравится", list(self.likes)
+        return "Мне нравится", list(self.likes), dict(self.meta)
 
     def search(self, kind, text):
         return []
@@ -35,10 +36,13 @@ class FakeDest(Provider):
     like_batch = 2
     request_interval = 0
 
+    supports_cover = True
+
     def __init__(self):
         self.catalog = []
         self.calls = []
         self.fail_after = None
+        self.playlists = {}   # id -> {"name", "items": [...]}
 
     def is_connected(self):
         return True
@@ -57,11 +61,23 @@ class FakeDest(Provider):
         self.calls.append(("like", list(ids)))
 
     def create_playlist(self, name, description):
-        self.calls.append(("create", name))
-        return f"PL{len([c for c in self.calls if c[0] == 'create'])}"
+        self.calls.append(("create", name, description))
+        pid = f"PL{len([c for c in self.calls if c[0] == 'create'])}"
+        self.playlists[pid] = {"name": name, "items": []}
+        return pid
 
     def add_to_playlist(self, pid, ids):
         self.calls.append(("add", pid, list(ids)))
+        self.playlists.setdefault(pid, {"name": "?", "items": []})["items"] += list(ids)
+
+    def set_cover(self, pid, jpeg):
+        self.calls.append(("cover", pid, jpeg))
+
+    def list_collections(self):
+        return [{"key": f"playlist:{k}", "title": v["name"], "kind": "playlist"} for k, v in self.playlists.items()]
+
+    def playlist_item_ids(self, pid):
+        return set(self.playlists.get(pid, {}).get("items", []))
 
 
 TRACKS = [
@@ -117,6 +133,7 @@ def test_full_flow(env):
     assert likes == [["sp:queen", "sp:kino"]]
     adds = [c for c in dst.calls if c[0] == "add"]
     assert adds == [("add", "PL1", ["sp:kino", "sp:queen"])]
+    assert [c for c in dst.calls if c[0] == "create"][0][2] == "Перенесено из FakeYandex"
 
     # повторный перенос ничего не дублирует
     n = len(dst.calls)
@@ -228,3 +245,70 @@ def test_notification_on_error_and_long_job(env, monkeypatch):
     n = len(notify.sent)
     jobs.start_match("spotify", sync=True)
     assert len(notify.sent) == n
+
+
+def _png(w=1200, h=900):
+    import io
+    from PIL import Image
+    import random
+    img = Image.new("RGB", (w, h))
+    img.putdata([(random.randrange(256), random.randrange(256), random.randrange(256)) for _ in range(w * h)])
+    buf = io.BytesIO()
+    img.save(buf, "PNG")
+    return buf.getvalue()
+
+
+def test_playlist_description_and_cover(env, monkeypatch):
+    db, src, dst = env
+    from app import covers, jobs
+    src.meta = {"description": "Лучшее\nза лето", "image": "https://img/cover.png"}
+    png = _png()
+    monkeypatch.setattr(covers, "download", lambda url, proxy=None: png)
+    jobs.start_import("yandex", [("likes", "likes")], sync=True)
+    jobs.start_match("spotify", sync=True)
+    jobs.start_transfer("spotify", False, True, "Лето", sync=True)
+    assert jobs.state()["error"] is None, jobs.state()
+    create = [c for c in dst.calls if c[0] == "create"][0]
+    assert create[2] == "Лучшее за лето · Перенесено из FakeYandex"
+    cover = [c for c in dst.calls if c[0] == "cover"][0][2]
+    assert cover[:2] == b"\xff\xd8" and len(cover) * 4 / 3 <= 256 * 1024
+    assert "обложка перенесена" in jobs.state()["message"]
+
+
+def test_cover_failure_does_not_break_transfer(env, monkeypatch):
+    db, src, dst = env
+    from app import covers, jobs
+    src.meta = {"image": "https://img/broken"}
+    monkeypatch.setattr(covers, "download", lambda url, proxy=None: b"not an image")
+    jobs.start_import("yandex", [("likes", "likes")], sync=True)
+    jobs.start_match("spotify", sync=True)
+    jobs.start_transfer("spotify", False, True, "X", sync=True)
+    assert jobs.state()["error"] is None
+    assert "обложку перенести не удалось" in jobs.state()["message"]
+    assert db.counts("yandex:likes", "spotify")["in_playlist"] == 2
+
+
+def test_no_duplicates_in_existing_playlist(env):
+    db, src, dst = env
+    from app import jobs
+    # в приёмнике уже есть плейлист с таким названием и одним из треков (например, база была очищена)
+    dst.playlists["OLD"] = {"name": "Мой плейлист", "items": ["sp:kino"]}
+    jobs.start_import("yandex", [("likes", "likes")], sync=True)
+    jobs.start_match("spotify", sync=True)
+    jobs.start_transfer("spotify", False, True, "Мой плейлист", sync=True)
+    assert jobs.state()["error"] is None, jobs.state()
+    assert not [c for c in dst.calls if c[0] == "create"]
+    assert dst.playlists["OLD"]["items"] == ["sp:kino", "sp:queen"]
+    assert "дублей: 1" in jobs.state()["message"]
+    # два трека источника, найденные как один и тот же трек приёмника, тоже не дублируются
+    jobs.import_csv("dup.csv", "Track name,Artist name\nГруппа крови,Кино\nГруппа крови,Кино\n".encode())
+    jobs.start_match("spotify", sync=True)
+    jobs.start_transfer("spotify", False, True, "Дубли", sync=True)
+    new_pl = [k for k, v in dst.playlists.items() if v["name"] == "Дубли"][0]
+    assert dst.playlists[new_pl]["items"] == ["sp:kino"]
+
+
+def test_to_jpeg_shrinks_big_images():
+    from app.covers import to_jpeg
+    out = to_jpeg(_png(2000, 1500))
+    assert out[:2] == b"\xff\xd8" and len(out) * 4 / 3 <= 256 * 1024

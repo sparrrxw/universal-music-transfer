@@ -16,6 +16,8 @@ jinja2==3.1.6
 markupsafe==3.0.4
 mpegdash==0.4.1
 opentelemetry-api==1.45.2
+pillow==12.3.0 ; python_full_version < '3.11'
+pillow==13.0.0 ; python_full_version >= '3.11'
 pyaes==1.6.1
 pydantic==2.14.3
 pydantic-core==2.50.4

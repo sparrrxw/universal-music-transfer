@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import html as _html
 import re
 import secrets
 import time
@@ -22,7 +23,7 @@ AUTH_URL = "https://accounts.spotify.com/authorize"
 TOKEN_URL = "https://accounts.spotify.com/api/token"
 API = "https://api.spotify.com/v1"
 SCOPES = ("user-library-read user-library-modify playlist-read-private playlist-read-collaborative "
-          "playlist-modify-private playlist-modify-public")
+          "playlist-modify-private playlist-modify-public ugc-image-upload")
 
 
 def _slim(t: dict) -> dict:
@@ -212,9 +213,13 @@ class Spotify(Provider):
             return "Любимые треки", [t for t in map(self._track, items) if t]
         if key.startswith("playlist:"):
             pid = key.split(":", 1)[1]
-            meta = self.request("GET", f"/playlists/{pid}", params={"fields": "name"}, essential=True) or {}
+            meta = self.request("GET", f"/playlists/{pid}", params={"fields": "name,description,images"},
+                                essential=True) or {}
             items = self._paged(f"/playlists/{pid}/items", {"limit": 50}, progress)
-            return meta.get("name") or "Плейлист", [t for t in map(self._track, items) if t]
+            images = sorted(meta.get("images") or [], key=lambda i: -(i.get("width") or 0))
+            extra = {"description": _html.unescape(meta.get("description") or ""),
+                     "image": images[0]["url"] if images else None}
+            return meta.get("name") or "Плейлист", [t for t in map(self._track, items) if t], extra
         raise ProviderError(f"Неизвестная коллекция Spotify: {key}")
 
     # --- запись -----------------------------------------------------------------
@@ -241,6 +246,29 @@ class Spotify(Provider):
         if not data.get("id"):
             raise ProviderError("Spotify не вернул id созданного плейлиста")
         return data["id"]
+
+    supports_cover = True
+
+    def set_cover(self, playlist_id: str, jpeg: bytes) -> None:
+        # Spotify принимает JPEG до 256 КБ в base64; нужен scope ugc-image-upload
+        self.throttle(essential=True)
+        r = None
+        with self._http() as h:
+            r = h.put(f"{API}/playlists/{playlist_id}/images", content=base64.b64encode(jpeg),
+                      headers={"Authorization": f"Bearer {self._access_token()}", "Content-Type": "image/jpeg"})
+        if r.status_code in (401, 403):
+            raise ProviderError("Spotify не дал поставить обложку: выйдите и войдите в Spotify заново "
+                                "(нужно новое разрешение на загрузку картинок)")
+        if r.status_code >= 400:
+            raise ProviderError(f"Spotify не принял обложку: {r.status_code} {r.text[:200]}")
+
+    def playlist_item_ids(self, playlist_id: str) -> set[str] | None:
+        out = set()
+        for it in self._paged(f"/playlists/{playlist_id}/items", {"limit": 50}):
+            t = it.get("track") or it.get("item") or {}
+            if t.get("uri"):
+                out.add(t["uri"])
+        return out
 
     def add_to_playlist(self, playlist_id: str, ids: list[str]) -> None:
         for i in range(0, len(ids), self.playlist_batch):

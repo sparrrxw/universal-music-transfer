@@ -31,6 +31,14 @@ def _ytrack(tr, pos_ts=None) -> dict | None:
     }
 
 
+def _cover_url(pl) -> str | None:
+    uri = getattr(getattr(pl, "cover", None), "uri", None) or getattr(pl, "og_image", None)
+    if not uri:
+        return None
+    uri = uri.replace("%%", "400x400")
+    return uri if uri.startswith("http") else "https://" + uri
+
+
 class Yandex(Provider):
     id = "yandex"
     name = "Яндекс Музыка"
@@ -97,6 +105,7 @@ class Yandex(Provider):
             user = None if key == "likes" else key.split(":", 1)[1]
             likes = client.users_likes_tracks(user_id=user) if user else client.users_likes_tracks()
             shorts = sorted(list(likes.tracks) if likes else [], key=lambda t: t.timestamp or "", reverse=True)
+            self._last_meta = {}
             return ("Мне нравится" if not user else f"Лайки {user}"), shorts
         if key.startswith("playlist:"):
             _, user, kind = key.split(":", 2)
@@ -117,6 +126,7 @@ class Yandex(Provider):
         title = pl.title or "Плейлист"
         if key.startswith("playlist:") and key.endswith(":3"):
             title = f"Мне нравится ({key.split(':')[1]})"
+        self._last_meta = {"description": pl.description or "", "image": _cover_url(pl)}
         return title, shorts
 
     def _details(self, client, shorts, progress) -> list[dict]:
@@ -146,7 +156,7 @@ class Yandex(Provider):
                 title, shorts = self._load(client, key)
                 if not shorts:
                     raise ProviderError("в плейлисте нет треков или он закрыт")
-                return title, self._details(client, shorts, progress)
+                return title, self._details(client, shorts, progress), getattr(self, "_last_meta", {})
             except NotConnected:
                 raise
             except Exception as e:  # noqa: BLE001
@@ -182,10 +192,24 @@ class Yandex(Provider):
 
     def create_playlist(self, name: str, description: str) -> str:
         self.throttle(essential=True)
-        pl = self._client().users_playlists_create(name, visibility="private")
+        client = self._client()
+        pl = client.users_playlists_create(name, visibility="private")
         if pl is None or pl.kind is None:
             raise ProviderError("Яндекс не создал плейлист")
+        if description:
+            try:
+                client.users_playlists_description(pl.kind, description)
+            except Exception:  # noqa: BLE001  (описание — не главное)
+                pass
         return str(pl.kind)
+
+    def playlist_item_ids(self, playlist_id: str) -> set[str] | None:
+        pl = self._client().users_playlists(int(playlist_id))
+        pl = pl[0] if isinstance(pl, list) else pl
+        return {str(t.id).split(":")[0] for t in (pl.tracks or [])} if pl else set()
+
+    def same_key(self, track_id: str) -> str:
+        return str(track_id).split(":")[0]
 
     def add_to_playlist(self, playlist_id: str, ids: list[str]) -> None:
         client = self._client()

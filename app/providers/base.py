@@ -79,8 +79,11 @@ class Provider:
         """Лайки и плейлисты аккаунта: [{"key", "title", "count", "kind": "likes"|"playlist"}]."""
         return []
 
-    def fetch(self, key: str, progress: Progress = None) -> tuple[str, list[dict]]:
-        """Загружает коллекцию (ключ из list_collections или parse_link). Возвращает (название, треки)."""
+    def fetch(self, key: str, progress: Progress = None) -> tuple:
+        """Загружает коллекцию (ключ из list_collections или parse_link).
+
+        Возвращает (название, треки) или (название, треки, {"description": …, "image": URL обложки}).
+        """
         raise ProviderError(f"{self.name}: чтение не поддерживается")
 
     def parse_link(self, url: str) -> str | None:
@@ -96,8 +99,32 @@ class Provider:
     def save_likes(self, ids: list[str]) -> None:
         raise ProviderError(f"{self.name}: запись не поддерживается")
 
+    supports_cover = False    # можно поставить свою обложку плейлиста
+    description_limit = 300
+
     def create_playlist(self, name: str, description: str) -> str:
         raise ProviderError(f"{self.name}: запись не поддерживается")
+
+    def set_cover(self, playlist_id: str, jpeg: bytes) -> None:
+        raise ProviderError(f"{self.name}: обложки не поддерживаются")
+
+    def playlist_item_ids(self, playlist_id: str) -> set[str] | None:
+        """id треков, которые уже лежат в плейлисте приёмника (None — сервис не умеет отдать)."""
+        return None
+
+    def find_playlist(self, name: str) -> str | None:
+        """Свой плейлист с таким названием (чтобы не плодить копии, если база была очищена)."""
+        try:
+            for c in self.list_collections():
+                if c.get("kind") == "playlist" and not c.get("note") and (c.get("title") or "").strip() == name.strip():
+                    return c["key"].split(":")[-1]
+        except Exception:  # noqa: BLE001  (не смогли проверить — просто создадим новый)
+            return None
+        return None
+
+    def same_key(self, track_id: str) -> str:
+        """Ключ для сравнения треков на дубли (у Яндекса один трек бывает в разных альбомах)."""
+        return track_id
 
     def add_to_playlist(self, playlist_id: str, ids: list[str]) -> None:
         raise ProviderError(f"{self.name}: запись не поддерживается")

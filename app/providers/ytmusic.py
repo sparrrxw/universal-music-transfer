@@ -96,15 +96,18 @@ class YouTubeMusic(Provider):
         api = self._api()
         if progress:
             progress("Загружаю список из YouTube Music…")
+        extra = {}
         if key == "likes":
             data = api.get_liked_songs(limit=100000) or {}
             title = "Понравившиеся"
         elif key.startswith("playlist:"):
             data = api.get_playlist(key.split(":", 1)[1], limit=None) or {}
             title = data.get("title") or "Плейлист"
+            thumbs = sorted(data.get("thumbnails") or [], key=lambda t: -(t.get("width") or 0))
+            extra = {"description": data.get("description") or "", "image": thumbs[0]["url"] if thumbs else None}
         else:
             raise ProviderError(f"Неизвестная коллекция YouTube Music: {key}")
-        return title, [t for t in map(self._track, data.get("tracks") or []) if t]
+        return title, [t for t in map(self._track, data.get("tracks") or []) if t], extra
 
     # --- запись -----------------------------------------------------------------
 
@@ -137,6 +140,12 @@ class YouTubeMusic(Provider):
         if not isinstance(res, str):
             raise ProviderError(f"YouTube Music не создал плейлист: {str(res)[:200]}")
         return res
+
+    description_limit = 5000
+
+    def playlist_item_ids(self, playlist_id: str) -> set[str] | None:
+        data = self._api().get_playlist(playlist_id, limit=None) or {}
+        return {t["videoId"] for t in data.get("tracks") or [] if t.get("videoId")}
 
     def add_to_playlist(self, playlist_id: str, ids: list[str]) -> None:
         api = self._api()

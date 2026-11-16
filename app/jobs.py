@@ -124,10 +124,13 @@ def _default_playlist_name(p: Provider, title: str) -> str:
 
 
 def _import_one(p: Provider, coll: str, kind: str, extra: dict | None = None, prefix: str = "") -> tuple[str, int]:
-    title, tracks = p.fetch(coll, progress=lambda m: _set(message=prefix + m))
+    res = p.fetch(coll, progress=lambda m: _set(message=prefix + m))
+    title, tracks = res[0], res[1]
+    meta = res[2] if len(res) > 2 else {}
     key = f"{p.id}:{coll}"
     n = store_collection(key, tracks, {"provider": p.id, "coll": coll, "title": title, "kind": kind,
-                                       **(extra or {})})
+                                       "description": (meta.get("description") or "").strip(),
+                                       "image": meta.get("image"), **(extra or {})})
     return key, n
 
 
@@ -324,31 +327,74 @@ def _transfer_source(key: str, p: Provider, to_library: bool, to_playlist: bool,
         name = (playlist_name or link.get("playlist_name")
                 or _default_playlist_name(src_p or p, title)).strip()
         pl = link.get("playlist") or {}
+        notes = []
         if not pl.get("id") or pl.get("name") != name:
-            src_name = src_p.name if src_p else "другого сервиса"
-            pl = {"id": p.create_playlist(name, f"Перенесено из {src_name}"), "name": name}
+            pl = {"id": _make_playlist(p, src_p, meta, name, notes), "name": name}
             db.save_link(key, p.id, {"playlist": pl, "playlist_name": name})
             db.execute("UPDATE matches SET in_playlist=0 WHERE source_key=? AND dest=?", (key, p.id))
         rows = db.query(base + " AND m.in_playlist=0 ORDER BY t.position ASC", (key, p.id))
+        # Что уже лежит в плейлисте приёмника (добавлено раньше, вручную или до очистки базы) — не дублируем.
+        try:
+            existing = p.playlist_item_ids(pl["id"]) if rows else None
+        except Exception:  # noqa: BLE001
+            existing = None
+        added = {p.same_key(x) for x in existing} if existing else set()
+        added |= {p.same_key(r["dest_id"]) for r in db.query(
+            "SELECT dest_id FROM matches WHERE source_key=? AND dest=? AND in_playlist=1 AND dest_id IS NOT NULL",
+            (key, p.id))}
+        skipped = 0
         _set(total=len(rows), done=0, message=f"«{title}» → плейлист «{name}»: 0 из {len(rows)}")
         for i in range(0, len(rows), p.playlist_batch):
             if _stop.is_set():
                 _set(message="Остановлено")
                 return False
             chunk = rows[i:i + p.playlist_batch]
-            added = {r["dest_id"] for r in db.query(
-                "SELECT dest_id FROM matches WHERE source_key=? AND dest=? AND in_playlist=1 AND dest_id IS NOT NULL",
-                (key, p.id))}
             ids = []
             for r in chunk:
-                if r["dest_id"] not in added:
-                    added.add(r["dest_id"])
+                k = p.same_key(r["dest_id"])
+                if k in added:
+                    skipped += 1
+                else:
+                    added.add(k)
                     ids.append(r["dest_id"])
             if ids:
                 p.add_to_playlist(pl["id"], ids)
             _mark("in_playlist", key, p.id, chunk)
             _set(done=i + len(chunk), message=f"«{title}» → плейлист «{name}»: {i + len(chunk)} из {len(rows)}")
+        if skipped:
+            notes.append(f"пропущено дублей: {skipped}")
+        if notes:
+            db.save_link(key, p.id, {"notes": notes})
     return True
+
+
+def _description(src_p: Provider | None, meta: dict, limit: int) -> str:
+    tail = f"Перенесено из {src_p.name}" if src_p else "Перенесено"
+    desc = (meta.get("description") or "").strip()
+    if not desc:
+        return tail
+    desc = " ".join(desc.split())   # переносы строк многие сервисы не принимают
+    room = limit - len(tail) - 3
+    if len(desc) > room:
+        desc = desc[:max(0, room - 1)].rstrip() + "…"
+    return f"{desc} · {tail}" if desc else tail
+
+
+def _make_playlist(p: Provider, src_p: Provider | None, meta: dict, name: str, notes: list) -> str:
+    """Находит свой плейлист с таким названием или создаёт новый с описанием и обложкой источника."""
+    pid = p.find_playlist(name)
+    if pid:
+        notes.append("плейлист с таким названием уже был, дополнил его")
+        return pid
+    pid = p.create_playlist(name, _description(src_p, meta, p.description_limit))
+    if meta.get("image") and p.supports_cover:
+        from . import covers
+        try:
+            p.set_cover(pid, covers.to_jpeg(covers.download(meta["image"], src_p.proxy() if src_p else None)))
+            notes.append("обложка перенесена")
+        except Exception as e:  # noqa: BLE001  (без обложки плейлист всё равно полезен)
+            notes.append(f"обложку перенести не удалось: {e}")
+    return pid
 
 
 def start_transfer(dest: str, to_library: bool, to_playlist: bool, playlist_name: str | None,
@@ -361,8 +407,10 @@ def start_transfer(dest: str, to_library: bool, to_playlist: bool, playlist_name
         if not _transfer_source(key, p, to_library, to_playlist, playlist_name):
             return
         c = db.counts(key, dest)
+        notes = db.link(key, dest).get("notes") if to_playlist else None
+        db.save_link(key, dest, {"notes": None})
         _set(message=f"Перенос в {p.name} завершён. В «{p.likes_name}»: {c['saved_library']}, "
-                     f"в плейлисте: {c['in_playlist']}")
+                     f"в плейлисте: {c['in_playlist']}" + (f" ({'; '.join(notes)})" if notes else ""))
     return _run("transfer", work, sync)
 
 

@@ -146,7 +146,13 @@ class Tidal(Provider):
                 if len(chunk) < 100:
                     break
                 offset += 100
-            return pl.name or "Плейлист", [t for t in map(_track, items) if t]
+            image = None
+            try:
+                image = pl.image(640)
+            except Exception:  # noqa: BLE001  (у плейлиста может не быть картинки)
+                pass
+            return pl.name or "Плейлист", [t for t in map(_track, items) if t], \
+                {"description": getattr(pl, "description", None) or "", "image": image}
         raise ProviderError(f"Неизвестная коллекция TIDAL: {key}")
 
     # --- запись -----------------------------------------------------------------
@@ -176,6 +182,18 @@ class Tidal(Provider):
     def create_playlist(self, name: str, description: str) -> str:
         self.throttle(essential=True)
         return str(self._logged().user.create_playlist(name, description or "").id)
+
+    description_limit = 500
+
+    def playlist_item_ids(self, playlist_id: str) -> set[str] | None:
+        pl = self._logged().playlist(playlist_id)
+        out, offset = set(), 0
+        while True:
+            chunk = pl.tracks(limit=100, offset=offset)
+            out |= {str(t.id) for t in chunk}
+            if len(chunk) < 100:
+                return out
+            offset += 100
 
     def add_to_playlist(self, playlist_id: str, ids: list[str]) -> None:
         pl = self._logged().playlist(playlist_id)

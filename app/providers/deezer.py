@@ -94,7 +94,8 @@ class Deezer(Provider):
             pid = key.split(":", 1)[1]
             meta = self._get(f"/playlist/{pid}")
             items = self._paged(f"/playlist/{pid}/tracks", progress)
-            return meta.get("title") or "Плейлист", [t for t in map(self._track, items) if t]
+            return meta.get("title") or "Плейлист", [t for t in map(self._track, items) if t], \
+                {"description": meta.get("description") or "", "image": meta.get("picture_xl") or meta.get("picture_big")}
         if key.startswith("user:"):
             uid = key.split(":", 1)[1]
             meta = self._get(f"/user/{uid}")
